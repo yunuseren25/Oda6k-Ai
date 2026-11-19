@@ -744,7 +744,7 @@
 
     .image-controls-row {
       display: grid;
-      grid-template-columns: 1fr auto;
+      grid-template-columns: 1fr 1fr auto;
       gap: 8px;
       margin-bottom: 10px;
     }
@@ -993,7 +993,7 @@
         <div class="section-header">
           <div>
             <div class="section-title">Canlı AI Asistan</div>
-            <div class="section-sub">Hızlı metin akışı &amp; ücretsiz görsel üretimi.</div>
+            <div class="section-sub">Hızlı metin akışı &amp; gelişmiş görsel stüdyosu.</div>
           </div>
           <span class="badge-time" id="aiLatencyBadge">Hazır</span>
         </div>
@@ -1038,6 +1038,12 @@
         <!-- GÖRSEL OLUŞTURMA MODU -->
         <div class="ai-mode-panel" id="aiImagePanel">
           <div class="image-controls-row">
+            <select id="imageStyleSelect">
+              <option value="photorealistic">Gerçekçi Fotoğraf</option>
+              <option value="digital_art">Dijital Sanat &amp; İllüstrasyon</option>
+              <option value="cinematic">Sinematik Işık &amp; Sahne</option>
+              <option value="minimal_diagram">Temiz Minimal / Çalışma Görseli</option>
+            </select>
             <select id="imageSizeSelect">
               <option value="1024x1024">Kare (1024x1024)</option>
               <option value="1280x720">Yatay (1280x720)</option>
@@ -1046,16 +1052,24 @@
             <button class="small-btn" id="downloadImageBtn" onclick="downloadGeneratedImage()" style="display: none; padding: 8px 12px;">İndir</button>
           </div>
 
-          <div class="chat-input-row" style="margin-bottom: 10px;">
-            <input type="text" id="imagePromptInput" placeholder="Nasıl bir görsel oluşturulsun? (ör: minimalist çalışma masası)" maxlength="500">
+          <div class="chat-input-row" style="margin-bottom: 8px;">
+            <input type="text" id="imagePromptInput" placeholder="Görsel betiği yaz (ör: yağmurlu gecede gece lambalı ders masası)" maxlength="500">
             <button class="btn-main" style="flex: 0 0 auto; padding: 10px 16px;" id="generateImageBtn" onclick="generateImage()">Üret</button>
           </div>
 
+          <div class="ai-context-row" style="margin-bottom: 10px;">
+            <label>
+              <input type="checkbox" id="enhancePromptCheck" checked>
+              Kalite &amp; detay artırma (otomatik zenginleştirme)
+            </label>
+            <span class="task-meta" id="enhancedPreviewTag"></span>
+          </div>
+
           <div class="image-preview-box" id="imagePreviewBox">
-            <span class="task-meta" id="imagePlaceholderText">Ücretsiz görsel üretim motoru hazır. İstediğin sahneyi veya şemayı yazıp "Üret" butonuna bas.</span>
+            <span class="task-meta" id="imagePlaceholderText">Kalite zenginleştirmeli görsel motoru hazır. Stil seç, sahneyi yaz ve "Üret" butonuna bas.</span>
             <img id="generatedImageEl" alt="Üretilen görsel">
           </div>
-          <div class="status-note" id="imageStatusNote">Ücretsiz açık servis kullanır; yoğunluk durumunda yeniden deneyebilirsin.</div>
+          <div class="status-note" id="imageStatusNote">Ücretsiz çoklu sunucu altyapısı kullanır.</div>
         </div>
       </div>
     </div>
@@ -1079,6 +1093,13 @@
       "Çalışma alanını sadeleştir",
       "Şu anki ana hedefi netleştir"
     ];
+
+    const IMAGE_STYLES = {
+      photorealistic: "ultra detailed realistic photography, natural depth of field, sharp focus, balanced exposure, authentic textures",
+      digital_art: "high quality digital art illustration, crisp linework, rich color harmony, clean composition, detailed background",
+      cinematic: "cinematic movie still, dramatic rim lighting, atmospheric depth, rich contrast, film grain, 35mm lens look",
+      minimal_diagram: "clean minimalist editorial visual, clear layout, high contrast, uncluttered composition, sharp legibility"
+    };
 
     // Zamanlayıcı ve istatistik durumları
     let defaultMinutes = 25;
@@ -1150,8 +1171,11 @@
 
     const aiChatPanelEl = document.getElementById("aiChatPanel");
     const aiImagePanelEl = document.getElementById("aiImagePanel");
+    const imageStyleSelectEl = document.getElementById("imageStyleSelect");
     const imageSizeSelectEl = document.getElementById("imageSizeSelect");
     const imagePromptInputEl = document.getElementById("imagePromptInput");
+    const enhancePromptCheckEl = document.getElementById("enhancePromptCheck");
+    const enhancedPreviewTagEl = document.getElementById("enhancedPreviewTag");
     const generateImageBtnEl = document.getElementById("generateImageBtn");
     const downloadImageBtnEl = document.getElementById("downloadImageBtn");
     const generatedImageEl = document.getElementById("generatedImageEl");
@@ -1859,37 +1883,70 @@
       }
     }
 
-    // Ücretsiz Görsel Oluşturma
+    // Gelişmiş Görsel Üretim Stüdyosu
+    function buildEnhancedPrompt(rawPrompt, styleKey, autoEnhance) {
+      const styleSuffix = IMAGE_STYLES[styleKey] || IMAGE_STYLES.photorealistic;
+      if (!autoEnhance) {
+        return `${rawPrompt}, ${styleSuffix}`;
+      }
+      return `${rawPrompt}, ${styleSuffix}, 8k resolution, high dynamic range, crisp details, no watermark, no text artifacts`;
+    }
+
+    async function fetchImageFromEndpoints(fullPrompt, width, height, seed) {
+      const encoded = encodeURIComponent(fullPrompt);
+      const negative = encodeURIComponent("blurry, low quality, distorted, watermark, ugly, deformed, artifacts");
+      const endpoints = [
+        `https://image.pollinations.ai/prompt/${encoded}?width=${width}&height=${height}&seed=${seed}&enhance=true&nologo=true&negative_prompt=${negative}`,
+        `https://image.pollinations.ai/prompt/${encoded}?width=${width}&height=${height}&seed=${seed}&nologo=true`
+      ];
+
+      let lastErr = null;
+      for (const endpoint of endpoints) {
+        try {
+          const res = await fetch(endpoint);
+          if (!res.ok) {
+            lastErr = new Error(`HTTP ${res.status}`);
+            continue;
+          }
+          const blob = await res.blob();
+          if (!blob.type || !blob.type.startsWith("image/")) {
+            lastErr = new Error("Geçersiz görsel içeriği");
+            continue;
+          }
+          return blob;
+        } catch (err) {
+          lastErr = err;
+        }
+      }
+      throw lastErr || new Error("Görsel sunucularına ulaşılamadı");
+    }
+
     async function generateImage() {
-      const prompt = imagePromptInputEl.value.trim();
-      if (!prompt) {
-        imageStatusNoteEl.textContent = "Önce ne çizileceğini yaz.";
+      const rawPrompt = imagePromptInputEl.value.trim();
+      if (!rawPrompt) {
+        imageStatusNoteEl.textContent = "Önce ne üretileceğini yaz.";
         return;
       }
 
+      const styleKey = imageStyleSelectEl.value;
+      const autoEnhance = enhancePromptCheckEl.checked;
       const [width, height] = imageSizeSelectEl.value.split("x");
       const seed = Math.floor(Math.random() * 1000000);
-      const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=${width}&height=${height}&seed=${seed}&nologo=true`;
+      const finalPrompt = buildEnhancedPrompt(rawPrompt, styleKey, autoEnhance);
 
       generateImageBtnEl.disabled = true;
       downloadImageBtnEl.style.display = "none";
       generatedImageEl.style.display = "none";
       imagePlaceholderTextEl.style.display = "block";
-      imagePlaceholderTextEl.textContent = "Görsel üretiliyor, lütfen bekle...";
-      imageStatusNoteEl.textContent = "Sunucudan görsel alınıyor...";
-      aiLatencyBadgeEl.textContent = "Çiziliyor...";
+      imagePlaceholderTextEl.textContent = "Detaylı görsel işleniyor, lütfen bekle...";
+      enhancedPreviewTagEl.textContent = autoEnhance ? "Kalite artırma aktif" : "Ham betik";
+      imageStatusNoteEl.textContent = "Yüksek kalite parametreleriyle üretiliyor...";
+      aiLatencyBadgeEl.textContent = "İşleniyor...";
 
       const startTime = performance.now();
 
       try {
-        const res = await fetch(url);
-        if (!res.ok) {
-          throw new Error(`HTTP ${res.status}`);
-        }
-        const blob = await res.blob();
-        if (!blob.type.startsWith("image/")) {
-          throw new Error("Geçersiz görsel yanıtı");
-        }
+        const blob = await fetchImageFromEndpoints(finalPrompt, width, height, seed);
         if (currentImageUrl && currentImageUrl.startsWith("blob:")) {
           URL.revokeObjectURL(currentImageUrl);
         }
@@ -1901,10 +1958,10 @@
 
         const elapsedMs = Math.round(performance.now() - startTime);
         aiLatencyBadgeEl.textContent = `${elapsedMs}ms`;
-        imageStatusNoteEl.textContent = "Görsel hazır.";
+        imageStatusNoteEl.textContent = `Hazır (${imageStyleSelectEl.options[imageStyleSelectEl.selectedIndex].text}).`;
       } catch (err) {
         imagePlaceholderTextEl.style.display = "block";
-        imagePlaceholderTextEl.textContent = "Görsel şu an üretilemedi. Kısa süre sonra tekrar dene veya betiği sadeleştir.";
+        imagePlaceholderTextEl.textContent = "Görsel şu an üretilemedi. Stil değiştirerek veya kısa süre sonra tekrar dene.";
         imageStatusNoteEl.textContent = `Hata: ${err.message}`;
         aiLatencyBadgeEl.textContent = "Hata";
       } finally {
@@ -1916,7 +1973,7 @@
       if (!currentImageUrl) return;
       const link = document.createElement("a");
       link.href = currentImageUrl;
-      link.download = `odak-gorsel-${Date.now()}.png`;
+      link.download = `odak-stüdyo-${Date.now()}.png`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
