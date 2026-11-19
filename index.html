@@ -657,7 +657,7 @@
 
     .ai-settings-row {
       display: grid;
-      grid-template-columns: 1fr 148px;
+      grid-template-columns: 1fr 158px auto;
       gap: 8px;
       margin-bottom: 10px;
     }
@@ -956,9 +956,12 @@
         <div class="ai-settings-row">
           <input type="password" id="groqApiKeyInput" placeholder="Groq API Anahtarı (gsk_...)" autocomplete="off">
           <select id="groqModelSelect" onchange="saveAiSettings()">
-            <option value="llama-3.3-70b-versatile">Llama 3.3 70B (Kalite)</option>
             <option value="llama-3.1-8b-instant">Llama 3.1 8B (Ultra Hız)</option>
+            <option value="qwen/qwen3-32b">Qwen 3 32B</option>
+            <option value="openai/gpt-oss-120b">GPT-OSS 120B</option>
+            <option value="openai/gpt-oss-20b">GPT-OSS 20B</option>
           </select>
+          <button class="small-btn" onclick="fetchGroqModels()" title="Aktif modelleri çek">Modeller</button>
         </div>
 
         <div class="ai-context-row">
@@ -1027,7 +1030,9 @@
 
     // AI durumları
     let groqApiKey = localStorage.getItem("odak_groq_key") || "";
-    let groqModel = localStorage.getItem("odak_groq_model") || "llama-3.3-70b-versatile";
+    let savedModel = localStorage.getItem("odak_groq_model") || "llama-3.1-8b-instant";
+    if (savedModel === "llama-3.3-70b-versatile") savedModel = "llama-3.1-8b-instant";
+    let groqModel = savedModel;
     let includeContext = localStorage.getItem("odak_ai_context") !== "false";
     let chatHistory = [];
     let isStreaming = false;
@@ -1077,12 +1082,60 @@
     brainDumpInputEl.value = brainDump;
 
     groqApiKeyInputEl.value = groqApiKey;
+    ensureModelOption(groqModel);
     groqModelSelectEl.value = groqModel;
+    localStorage.setItem("odak_groq_model", groqModel);
     includeContextCheckEl.checked = includeContext;
     groqApiKeyInputEl.addEventListener("input", saveAiSettings);
 
     checkReminders();
     setInterval(checkReminders, 20000);
+
+    function ensureModelOption(modelId) {
+      if (!modelId) return;
+      const exists = Array.from(groqModelSelectEl.options).some(opt => opt.value === modelId);
+      if (!exists) {
+        const opt = document.createElement("option");
+        opt.value = modelId;
+        opt.textContent = modelId;
+        groqModelSelectEl.appendChild(opt);
+      }
+    }
+
+    async function fetchGroqModels() {
+      saveAiSettings();
+      if (!groqApiKey) {
+        aiStatusNoteEl.textContent = "Önce API anahtarını gir.";
+        return;
+      }
+      aiStatusNoteEl.textContent = "Aktif modeller çekiliyor...";
+      try {
+        const res = await fetch("https://api.groq.com/openai/v1/models", {
+          headers: { "Authorization": `Bearer ${groqApiKey}` }
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        const models = (data.data || [])
+          .filter(m => !m.id.includes("whisper") && !m.id.includes("guard") && !m.id.includes("tts") && !m.id.includes("playai"))
+          .map(m => m.id);
+
+        if (models.length > 0) {
+          groqModelSelectEl.innerHTML = "";
+          models.forEach(id => {
+            const opt = document.createElement("option");
+            opt.value = id;
+            opt.textContent = id;
+            groqModelSelectEl.appendChild(opt);
+          });
+          groqModel = models.includes(groqModel) ? groqModel : models[0];
+          groqModelSelectEl.value = groqModel;
+          saveAiSettings();
+          aiStatusNoteEl.textContent = `${models.length} model yüklendi: ${groqModel}`;
+        }
+      } catch (err) {
+        aiStatusNoteEl.textContent = `Model listesi alınamadı: ${err.message}`;
+      }
+    }
 
     function switchTab(tabId, btn) {
       document.querySelectorAll(".tab-panel").forEach(p => p.classList.remove("active"));
@@ -1654,7 +1707,7 @@
 
         if (!res.ok) {
           const errText = await res.text();
-          throw new Error(`HTTP ${res.status}: ${errText.slice(0, 120)}`);
+          throw new Error(`HTTP ${res.status}: ${errText.slice(0, 140)}`);
         }
 
         const reader = res.body.getReader();
@@ -1695,7 +1748,7 @@
       } catch (err) {
         assistantMsgEl.textContent = `Hata oluştu: ${err.message}`;
         aiLatencyBadgeEl.textContent = "Hata";
-        aiStatusNoteEl.textContent = "API anahtarını veya bağlantıyı kontrol et.";
+        aiStatusNoteEl.textContent = "Modeli değiştir veya 'Modeller' butonuna bas.";
         chatHistory.pop();
       } finally {
         isStreaming = false;
@@ -1719,4 +1772,3 @@
   </script>
 </body>
 </html>
-6
